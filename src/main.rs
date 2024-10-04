@@ -1,99 +1,101 @@
+use reqwest::Client;
+use serde_json::Value;
 use std::sync::{Arc, Mutex};
-use tokio::time::Duration;
-use reqwest; // Ensure this is included in your Cargo.toml
-use serde::Deserialize;
+use tokio::time::{self, Duration};
 
-// Define a struct for the stock price
-#[derive(Deserialize, Clone)] // Added Clone trait
-struct StockPrice {
+#[derive(Debug, Clone)]
+struct Stock {
+    symbol: String,
     price: f64,
 }
 
-// Struct for the Trading Bot
-#[derive(Default)]
 struct TradingBot {
-    position: f64,      // Current position in the stock (positive for long, negative for short)
-    balance: f64,       // Current balance
-    total_profit: f64,  // Total profit/loss
-    last_price: f64,    // Last stock price for comparison
+    stocks: Vec<Stock>,
+    positions: Vec<Stock>,
+    balance: f64,
+    profit_loss: f64,
 }
 
-// Implement trading logic
 impl TradingBot {
     fn new() -> Self {
-        Self::default()
+        Self {
+            stocks: vec![],
+            positions: vec![],
+            balance: 10000.0,
+            profit_loss: 0.0,
+        }
     }
 
-    fn evaluate_trade(&mut self, current_price: f64) {
-        let price_change = (current_price - self.last_price) / self.last_price * 100.0;
+    fn update_stocks(&mut self, fetched_stocks: Vec<Stock>) {
+        self.stocks = fetched_stocks;
+    }
 
-        // Buy if price drops by 2%
-        if price_change <= -2.0 && self.position <= 0.0 {
-            self.position += 1.0; // Buy one unit
-            self.balance -= current_price; // Deduct the price from balance
-            println!("Bought at: {}", current_price);
+    fn trade(&mut self) {
+        for stock in &self.stocks {
+            let current_price = stock.price;
+            if let Some(position) = self.positions.iter_mut().find(|p| p.symbol == stock.symbol) {
+                // Check for selling condition
+                if current_price >= position.price * 1.03 {
+                    self.balance += current_price; // Assuming selling 1 unit for simplicity
+                    self.profit_loss += (current_price - position.price);
+                    println!("Sold 1 share of {} at ${:.2}.", stock.symbol, current_price);
+                    self.positions.retain(|p| p.symbol != stock.symbol); // Remove the position after selling
+                }
+            } else {
+                // Check for buying condition
+                if current_price <= stock.price * 0.98 {
+                    let quantity_to_buy = 1; // Define quantity to buy
+                    self.balance -= current_price;
+                    self.positions.push(Stock {
+                        symbol: stock.symbol.clone(),
+                        price: current_price,
+                    });
+                    println!("Bought 1 share of {} at ${:.2}.", stock.symbol, current_price);
+                }
+            }
         }
-        // Sell if price rises by 3%
-        else if price_change >= 3.0 && self.position >= 1.0 {
-            self.position -= 1.0; // Sell one unit
-            self.balance += current_price; // Add the price to balance
-            println!("Sold at: {}", current_price);
-        }
+    }
 
-        // Update the last price and calculate total profit/loss
-        self.last_price = current_price;
-        self.total_profit = self.position * current_price + self.balance; // Calculate total profit/loss
+    fn summary(&self) {
+        println!("Current Balance: ${:.2}", self.balance);
+        println!("Total Profit/Loss: ${:.2}", self.profit_loss);
+        println!("Open Positions: {:?}", self.positions);
+    }
+}
 
-        // Print summary of current state
-        println!("Current Position: {}, Balance: {}, Total Profit/Loss: {}", 
-            self.position, self.balance, self.total_profit);
+async fn start_trading_bot() {
+    let client = Client::new();
+    let bot = Arc::new(Mutex::new(TradingBot::new()));
+
+    loop {
+        // Fetch data from the mock API
+        let response = client
+            .get("http://127.0.0.1:8080/api/stock_prices")
+            .send()
+            .await
+            .expect("Failed to fetch stock prices");
+
+        let stocks: Vec<Value> = response.json().await.expect("Failed to parse JSON");
+
+        let fetched_stocks: Vec<Stock> = stocks.into_iter().map(|s| {
+            Stock {
+                symbol: s["symbol"].as_str().unwrap().to_string(),
+                price: s["price"].as_f64().unwrap(),
+            }
+        }).collect();
+
+        let mut bot = bot.lock().unwrap();
+        bot.update_stocks(fetched_stocks);
+        bot.trade(); // Execute trading logic
+        bot.summary(); // Print summary
+
+        // Sleep for a specified duration (e.g., 5 seconds)
+        time::sleep(Duration::from_secs(5)).await;
     }
 }
 
 #[tokio::main]
 async fn main() {
-    // Initialize the state for storing stock prices
-    let stock_prices = Arc::new(Mutex::new(Vec::new()));
-
-    // Create a trading bot instance
-    let mut trading_bot = TradingBot::new();
-
-    // Start generating mock stock prices (from mock API)
-    let stock_prices_clone = Arc::clone(&stock_prices);
-    tokio::spawn(async move {
-        loop {
-            // Call the mock API to get current stock prices
-            match reqwest::get("http://localhost:8080/api/stock_prices").await {
-                Ok(response) => {
-                    // Parse the JSON response
-                    if let Ok(stock_prices_vec) = response.json::<Vec<StockPrice>>().await {
-                        let mut prices = stock_prices_clone.lock().unwrap();
-                        for stock_price in stock_prices_vec {
-                            prices.push(stock_price.clone()); // Clone here to avoid move
-                            println!("Fetched stock price: {}", stock_price.price); // Access original stock_price
-                        }
-                    } else {
-                        eprintln!("Failed to parse stock price.");
-                    }
-                }
-                Err(e) => eprintln!("Error fetching stock prices: {}", e),
-            }
-
-            // Wait before the next API call
-            tokio::time::sleep(Duration::from_secs(5)).await;
-        }
-    });
-
-    // Start monitoring stock prices and making trades
-    loop {
-        // Get the latest stock prices
-        let prices = stock_prices.lock().unwrap();
-        if let Some(latest_price) = prices.last() {
-            // Evaluate trades based on the latest price
-            trading_bot.evaluate_trade(latest_price.price);
-        }
-
-        // Wait for a while before checking again
-        tokio::time::sleep(Duration::from_secs(5)).await;
-    }
+    // Start the trading bot
+    start_trading_bot().await;
 }
