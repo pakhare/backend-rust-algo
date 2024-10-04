@@ -30,11 +30,12 @@ In a new terminal window, navigate to the root of the project and run:
 cargo run --bin backend_assignment
 ```
 The trading bot will start monitoring stock prices and executing trades based on the defined strategy.
+___
 
 ### API Usage
 The mock API provides an endpoint to retrieve stock prices:
 
-Endpoint: GET /api/stock_prices
+Endpoint: GET /api/stock_prices   
 Response:
 ```json
 [
@@ -59,15 +60,15 @@ The trading bot evaluates trades based on the following criteria:
 - Buy: When the stock price drops by 2% compared to the last price, and there are no open positions.
 - Sell: When the stock price rises by 3% compared to the last price, and there is an open position.
 - Profit/Loss Tracking
--- Current Position: Positive for long positions, negative for short positions.
-- Current Balance: The cash balance available for trading.
-- Total Profit: The overall profit/loss based on current positions and balance.
+    - Current Position: Positive for long positions, negative for short positions.
+    - Current Balance: The cash balance available for trading.
+    - Total Profit: The overall profit/loss based on current positions and balance.
 
 ### Technologies Used and Dependancies
-Rust
-Actix Web (for the mock API)
-Reqwest (for making HTTP requests)
-Serde (for JSON serialization/deserialization)
-Tokio (for asynchronous programming)
+- Rust
+- Actix Web (for the mock API)
+- Reqwest (for making HTTP requests)
+- Serde (for JSON serialization/deserialization)
+- Tokio (for asynchronous programming)
 
 
